@@ -29,37 +29,37 @@ FIRST_TEMP_MSG = 'First Temperature Logged'
 SECOND_TEMP_MSG = 'Second Temperature Logged (> 4 hours later)'
 
 def deregister_user(update, context):
-    userId = update.message.from_user.id
+    user_id = update.message.from_user.id
+    user_data = context.user_data
     chat_id = update.message.chat_id
     name = update.message.from_user.first_name
+
+    print("******************************************")
+    print(user_data)
+    print("******************************************")
 
     if (chat_id > 0):
         context.bot.send_message(chat_id=chat_id, text="This command can only be sent in a group channel!", parse_mode=telegram.ParseMode.HTML)
         return
 
-    if "membersDict" not in context.chat_data:
+    if "memberIdSet" not in context.chat_data:
         context.bot.send_message(chat_id=update.message.chat_id, text="No one has registered in this chat yet!", parse_mode=telegram.ParseMode.HTML)
     else:
-        if userId not in context.chat_data["membersDict"]:
+        if user_id not in context.chat_data["memberIdSet"]:
             context.bot.send_message(chat_id=update.message.chat_id, text="<b>%s</b> has not yet registered for temperature reminders!" % name, parse_mode=telegram.ParseMode.HTML)
         else:
-            member = context.chat_data["membersDict"][userId]
-            if member["remindMe"]:
-                member["remindMe"] = False
-                context.bot.send_message(chat_id=update.message.chat_id, text="Reminders are now disabled for <b>%s</b>!" % member["name"], parse_mode=telegram.ParseMode.HTML)
+            if user_data["remindMe"]:
+                user_data["remindMe"] = False
+                context.bot.send_message(chat_id=update.message.chat_id, text="Reminders are now disabled for <b>%s</b>!" % user_data["name"], parse_mode=telegram.ParseMode.HTML)
             else:
-                context.bot.send_message(chat_id=update.message.chat_id, text="Reminders are already disabled for <b>%s</b>!" % member["name"], parse_mode=telegram.ParseMode.HTML)
+                context.bot.send_message(chat_id=update.message.chat_id, text="Reminders are already disabled for <b>%s</b>!" % user_data["name"], parse_mode=telegram.ParseMode.HTML)
 
 def register_user(update, context):
 
-    userId = update.message.from_user.id
+    user_id = update.message.from_user.id
+    user_data = context.user_data
     name = update.message.from_user.first_name
     chat_id = update.message.chat_id
-
-    if "chat_data" not in context.user_data:
-        context.user_data["chat_data"] = {}
-
-    context.user_data["chat_data"][chat_id] = context.chat_data
 
     if (chat_id > 0):
         context.bot.send_message(chat_id=chat_id, text="This command can only be sent in a group channel!", parse_mode=telegram.ParseMode.HTML)
@@ -76,9 +76,8 @@ def register_user(update, context):
         context.bot_data["runningChatIds"].add(chat_id)
         context.bot_data["all_chat_data"][chat_id] = context.chat_data
 
-    if "membersDict" not in context.chat_data:
-        context.chat_data["membersDict"] = {}
-        context.chat_data["membersArray"] = []
+    if "memberIdSet" not in context.chat_data:
+        context.chat_data["memberIdSet"] = set()
         context.chat_data["chat_id"] = chat_id
         context.chat_data["title"] = update.message.chat.title
 
@@ -87,28 +86,34 @@ def register_user(update, context):
     # *********************************************
 
     try:
-        context.bot.sendMessage(chat_id=userId, text="You have successfully joined the temperature reminder system", parse_mode=telegram.ParseMode.HTML)
+        context.bot.sendMessage(chat_id=user_id, text="You have successfully joined the temperature reminder system", parse_mode=telegram.ParseMode.HTML)
 
-        if userId not in context.chat_data["membersDict"]:
-            member = {"id":userId, "name": name, "firstTempTaken": False, "secondTempTaken": False, "remindMe": True}
-            context.chat_data["membersDict"][userId] = member
-            context.chat_data["membersArray"].append(member)
+        if user_id not in context.chat_data["memberIdSet"]:
+            if "firstTempTaken" not in user_data:
+                user_data["firstTempTaken"] = False
+                user_data["secondTempTaken"] = False
+                user_data["name"] = name
+                user_data["id"] = user_id
+
+            user_data["remindMe"] = True
+
+            context.chat_data["memberIdSet"].add(user_id)
 
             context.bot.send_message(chat_id=update.message.chat_id, text="<b>%s</b> has registered for temperature reminders!" % name, parse_mode=telegram.ParseMode.HTML)
 
-            sendTemperatureRequest(member, context.chat_data, context.bot)
+            sendTemperatureRequest(user_data, context.chat_data, context.bot)
         else:
-            member = context.chat_data["membersDict"][userId]
+            user_data = context.dispatcher.user_data[user_id]
 
-            if member["remindMe"]:
+            if user_data["remindMe"]:
                 context.bot.send_message(chat_id=update.message.chat_id, text="<b>%s</b> has already registered for temperature reminders!" % name, parse_mode=telegram.ParseMode.HTML)
             else:
-                member["remindMe"] = True
+                user_data["remindMe"] = True
                 context.bot.send_message(chat_id=update.message.chat_id, text="<b>%s</b> has re-enabled temperature reminders!" % name, parse_mode=telegram.ParseMode.HTML)
     except:
          context.bot.send_message(chat_id=update.message.chat_id, text="%s has to click @temp_taking_reminder_bot and press 'Start' to add the bot before registering. Please do so first, and type /in again." % name)
 
-def sendTemperatureRequest(member, chat_data, chat_bot):
+def sendTemperatureRequest(user_data, chat_data, chat_bot):
     custom_keyboard  = [
         [ FIRST_TEMP_MSG ],
         [ SECOND_TEMP_MSG ],
@@ -118,28 +123,29 @@ def sendTemperatureRequest(member, chat_data, chat_bot):
 
     reminderStr = ""
 
-    if not member["firstTempTaken"]:
-        reminderStr = "Hi %s, you have not logged your <b>morning</b> 🌡️ yet today (%s)" % (member["name"], todayStr)
-    elif not member["secondTempTaken"]:
-        reminderStr = "Hi %s, you have not logged your <b>afternoon</b> 🌡️ yet today (%s)" % (member["name"], todayStr)
+    if not user_data["firstTempTaken"]:
+        reminderStr = "Hi %s, you have not logged your <b>morning</b> 🌡️ yet today (%s)" % (user_data["name"], todayStr)
+    elif not user_data["secondTempTaken"]:
+        reminderStr = "Hi %s, you have not logged your <b>afternoon</b> 🌡️ yet today (%s)" % (user_data["name"], todayStr)
 
-    try:
-        if (not member["firstTempTaken"]) or (not member["secondTempTaken"]):
-            chat_bot.sendMessage(chat_id=member["id"], text=reminderStr, reply_markup=reply_markup, parse_mode=telegram.ParseMode.HTML)
-        else:
-            chat_bot.sendMessage(chat_id=member["id"], text="You have logged both temperatures for today, nicely done!", reply_markup=reply_markup)
+    # try:
+    if (not user_data["firstTempTaken"]) or (not user_data["secondTempTaken"]):
+        chat_bot.sendMessage(chat_id=user_data["id"], text=reminderStr, reply_markup=reply_markup, parse_mode=telegram.ParseMode.HTML)
+    else:
+        chat_bot.sendMessage(chat_id=user_data["id"], text="You have logged both temperatures for today, nicely done!", reply_markup=reply_markup)
 
-    except:
-        if "firstTry" not in member:
-            member["firstTry"] = True
-        else:
-            chat_bot.send_message(chat_id=chat_data["chat_id"], text="<b>%s</b> needs to add the bot by clicking @wavelength_boardgame_bot first before typing /in again to join the game!" % name, parse_mode=telegram.ParseMode.HTML)
+    # except:
+        # if "firstTry" not in user_data:
+        #     user_data["firstTry"] = True
+        # else:
+        #     chat_bot.send_message(chat_id=chat_data["chat_id"], text="<b>%s</b> needs to add the bot by clicking @temp_taking_reminder_bot first before typing /in again to register for reminders!" % user_data["name"], parse_mode=telegram.ParseMode.HTML)
 
-def sendTemperatureRequestToAll(chat_data, chat_id, chat_bot):
+def sendTemperatureRequestToAll(context, chat_data, chat_id, chat_bot):
 
-    for member in chat_data["membersArray"]:
-        if member["remindMe"] and not (member["firstTempTaken"] and member["secondTempTaken"]):
-            sendTemperatureRequest(member, chat_data, chat_bot)
+    for user_id in chat_data["memberIdSet"]:
+        user_data = context.dispatcher.user_data[user_id]
+        if user_data["remindMe"] and not (user_data["firstTempTaken"] and user_data["secondTempTaken"]):
+            sendTemperatureRequest(user_data, chat_data, chat_bot)
 
 def unsubscribe(update, context):
     bot_data = context.bot_data
@@ -147,7 +153,7 @@ def unsubscribe(update, context):
     name = update.message.from_user.first_name
     chat_data = context.chat_data
     chat_id = update.message.chat_id
-    userId = update.message.from_user.id
+    user_id = update.message.from_user.id
 
     if (chat_id > 0):
         context.bot.send_message(chat_id=chat_id, text="This command can only be sent in a group channel!", parse_mode=telegram.ParseMode.HTML)
@@ -156,8 +162,8 @@ def unsubscribe(update, context):
     if "subscriberIds" not in chat_data:
         chat_data["subscriberIds"] = set()
 
-    if userId in chat_data["subscriberIds"]:
-        chat_data["subscriberIds"].remove(userId)
+    if user_id in chat_data["subscriberIds"]:
+        chat_data["subscriberIds"].remove(user_id)
         context.bot.send_message(chat_id=chat_id, text="%s has unsubscribed from the final reminder list" % name, parse_mode=telegram.ParseMode.HTML)
     else:
         context.bot.send_message(chat_id=chat_id, text="%s has not yet subscribed to the final reminder list" % name, parse_mode=telegram.ParseMode.HTML)
@@ -168,7 +174,7 @@ def subscribe(update, context):
     name = update.message.from_user.first_name
     chat_data = context.chat_data
     chat_id = update.message.chat_id
-    userId = update.message.from_user.id
+    user_id = update.message.from_user.id
 
     if (chat_id > 0):
         context.bot.send_message(chat_id=chat_id, text="This command can only be sent in a group channel!", parse_mode=telegram.ParseMode.HTML)
@@ -177,10 +183,10 @@ def subscribe(update, context):
     if "subscriberIds" not in chat_data:
         chat_data["subscriberIds"] = set()
 
-    if userId in chat_data["subscriberIds"]:
+    if user_id in chat_data["subscriberIds"]:
         context.bot.send_message(chat_id=chat_id, text="%s has already subscribed to the final reminder list" % name, parse_mode=telegram.ParseMode.HTML)
     else:
-        chat_data["subscriberIds"].add(userId)
+        chat_data["subscriberIds"].add(user_id)
         context.bot.send_message(chat_id=chat_id, text="%s has subscribed to the final reminder list" % name, parse_mode=telegram.ParseMode.HTML)
 
 def remind_all(update, context):
@@ -193,8 +199,8 @@ def remind_all(update, context):
         context.bot.send_message(chat_id=chat_id, text="This command can only be sent in a group channel!", parse_mode=telegram.ParseMode.HTML)
         return
 
-    if "membersArray" in chat_data:
-        sendTemperatureRequestToAll(chat_data, chat_id, context.bot)
+    if "memberIdSet" in chat_data:
+        sendTemperatureRequestToAll(context, chat_data, chat_id, context.bot)
 
 def list_all(update, context):
     bot_data = context.bot_data
@@ -206,10 +212,12 @@ def list_all(update, context):
         context.bot.send_message(chat_id=chat_id, text="This command can only be sent in a group channel!", parse_mode=telegram.ParseMode.HTML)
         return
 
-    if "membersArray" in chat_data:
+    if "memberIdSet" in chat_data:
         membersText = "<b>The following individuals are registered for temperature reminders:</b>"
-        for member in chat_data["membersArray"]:
-            membersText += "%s\n" % member["name"]
+
+        for user_id in chat_data["memberIdSet"]:
+            user_data = context.dispatcher.user_data[user_id]
+            membersText += "%s\n" % user_data["name"]
 
         context.bot.send_message(chat_id=chat_id, text=membersText, parse_mode=telegram.ParseMode.HTML)
 
@@ -222,9 +230,10 @@ def clear_temperature_logs(context):
 
     for chat_id in bot_data["runningChatIds"]:
         chat_data = bot_data["all_chat_data"][chat_id]
-        for member in chat_data["membersArray"]:
-            member["firstTempTaken"] = False
-            member["secondTempTaken"] = False
+        for user_id in chat_data["memberIdSet"]:
+            user_data = context.dispatcher.user_data[user_id]
+            user_data["firstTempTaken"] = False
+            user_data["secondTempTaken"] = False
 
 def daily_temperature_checks_subscribers(context):
     check_time = context.job.context["check_time"]
@@ -236,7 +245,7 @@ def daily_temperature_checks_subscribers(context):
 
     for chat_id in bot_data["runningChatIds"]:
         chat_data = bot_data["all_chat_data"][chat_id]
-        checkTemperatureLogs(chat_data, chat_id, context.bot, check_time, sendToUserIds=chat_data["subscriberIds"])
+        checkTemperatureLogs(context, chat_data, chat_id, context.bot, check_time, sendToUserIds=chat_data["subscriberIds"])
 
 def daily_temperature_reminders(context):
     print("DAILY TEMP REMINDERS")
@@ -247,14 +256,15 @@ def daily_temperature_reminders(context):
 
     for chat_id in bot_data["runningChatIds"]:
         chat_data = bot_data["all_chat_data"][chat_id]
-        sendTemperatureRequestToAll(chat_data, chat_id, context.bot)
+        sendTemperatureRequestToAll(context, chat_data, chat_id, context.bot)
 
 def daily_temperature_final_reminders(context):
     finalReminderStartTime = datetime.time(18,30,00,0000)
+    finalReminderEndTime = datetime.time(23,59,59,0000)
 
     timezone = pytz.timezone("Asia/Singapore")
     now = datetime.datetime.now(timezone).time()
-    if (now > finalReminderStartTime):
+    if (now > finalReminderStartTime) and (now < finalReminderEndTime):
         print("DAILY TEMP FINAL REMINDERS: " + str(now))
         daily_temperature_reminders(context)
 
@@ -268,16 +278,18 @@ def daily_temperature_checks(context):
 
     for chat_id in bot_data["runningChatIds"]:
         chat_data = bot_data["all_chat_data"][chat_id]
-        print(chat_id)
-        print(chat_data)
-        # checkTemperatureLogs(chat_data, chat_id, context.bot, check_time)
+        checkTemperatureLogs(context, chat_data, chat_id, context.bot, check_time)
 
 def check_temperature_logs(update, context):
+
+    if "memberIdSet" not in context.chat_data:
+        context.bot.send_message(chat_id=update.message.chat_id, text="No one has registered in this chat yet!", parse_mode=telegram.ParseMode.HTML)
+        return
 
     chat_id = update.message.chat_id
     chat_data = context.chat_data
 
-    checkTemperatureLogs(chat_data, chat_id, context.bot, "afternoon")
+    checkTemperatureLogs(context, chat_data, chat_id, context.bot, "afternoon")
 
 def getResultEmoji(result):
     if result:
@@ -285,7 +297,7 @@ def getResultEmoji(result):
     else:
         return "❌"
 
-def checkTemperatureLogs(chat_data, chat_id, chat_bot, check_time, sendToUserIds=None):
+def checkTemperatureLogs(context, chat_data, chat_id, chat_bot, check_time, sendToUserIds=None):
 
     time_emoji = "🌅"
     if check_time != "morning":
@@ -295,23 +307,24 @@ def checkTemperatureLogs(chat_data, chat_id, chat_bot, check_time, sendToUserIds
     notCompletedBoth = []
     notCompletedFirst = []
 
-    for member in chat_data["membersArray"]:
+    for user_id in chat_data["memberIdSet"]:
+        user_data = context.dispatcher.user_data[user_id]
 
         if check_time == "morning":
-            if (not member["firstTempTaken"]) and (sendToUserIds == None):
-                sendTemperatureRequest(member, chat_data, chat_bot)
+            if (not user_data["firstTempTaken"]) and (sendToUserIds == None):
+                sendTemperatureRequest(user_data, chat_data, chat_bot)
         else:
-            if ((not member["firstTempTaken"]) or (not member["secondTempTaken"])) and (sendToUserIds == None):
-                sendTemperatureRequest(member, chat_data, chat_bot)
+            if ((not user_data["firstTempTaken"]) or (not user_data["secondTempTaken"])) and (sendToUserIds == None):
+                sendTemperatureRequest(user_data, chat_data, chat_bot)
 
-        if not member["firstTempTaken"]:
-            notCompletedFirst.append(member["name"])
+        if not user_data["firstTempTaken"]:
+            notCompletedFirst.append(user_data["name"])
 
-        if not (member["firstTempTaken"] and member["secondTempTaken"]):
-            notCompletedBoth.append(member["name"])
+        if not (user_data["firstTempTaken"] and user_data["secondTempTaken"]):
+            notCompletedBoth.append(user_data["name"])
 
-        if member["remindMe"]:
-            resultsText += "%s -> 1st temp. logged (%s), 2nd temp. logged (%s)\n" % (member["name"], getResultEmoji(member["firstTempTaken"]), getResultEmoji(member["secondTempTaken"]))
+        if user_data["remindMe"]:
+            resultsText += "%s -> 1st temp. logged (%s), 2nd temp. logged (%s)\n" % (user_data["name"], getResultEmoji(user_data["firstTempTaken"]), getResultEmoji(user_data["secondTempTaken"]))
 
     if check_time == "morning":
         if len(notCompletedFirst) > 0:
@@ -371,46 +384,28 @@ def admin(update, context):
 
 def enter(update, context):
 
-    print("*****************************************")
     if (update.message == None):
         return
 
-    og_chat_data = context.chat_data
-    print(og_chat_data)
     user_data = context.user_data
     chat_id = update.message.chat_id
-    userId = update.message.from_user.id
+    user_id = update.message.from_user.id
     msgText = update.message.text
-
-
-
-    user_data = context.dispatcher.user_data[id]
 
     # Guarantees that this is private chat with player, rather than a group chat
     if (chat_id > 0):
         if ("remindMe" not in context.user_data) or (not context.user_data["remindMe"]):
-            context.bot.send_message(chat_id=userId, text="You are not in any temperature reminding groups!", parse_mode=telegram.ParseMode.HTML)
+            context.bot.send_message(chat_id=user_id, text="You are not in any temperature reminding groups!", parse_mode=telegram.ParseMode.HTML)
             return
 
-        for chat_id in context.user_data["chat_data"]:
-            chat_data = context.user_data["chat_data"][chat_id]
-            print(chat_data)
-            member = chat_data["membersDict"][userId]
-
-            if msgText == FIRST_TEMP_MSG:
-                member["firstTempTaken"] = True
-            elif msgText == SECOND_TEMP_MSG:
-                member["secondTempTaken"] = True
-
         if msgText == FIRST_TEMP_MSG:
-            member["firstTempTaken"] = True
-            context.bot.send_message(chat_id=userId, text="First temperature log noted!", parse_mode=telegram.ParseMode.HTML)
+            user_data["firstTempTaken"] = True
+            context.bot.send_message(chat_id=user_id, text="First temperature log noted!", parse_mode=telegram.ParseMode.HTML)
         elif msgText == SECOND_TEMP_MSG:
-            member["secondTempTaken"] = True
-            context.bot.send_message(chat_id=userId, text="Second temperature log noted!", parse_mode=telegram.ParseMode.HTML)
+            user_data["secondTempTaken"] = True
+            context.bot.send_message(chat_id=user_id, text="Second temperature log noted!", parse_mode=telegram.ParseMode.HTML)
 
-        context.bot.send_message(chat_id=userId, text="Current status: 1st Log - [%s], 2nd Log - [%s]" % (getResultEmoji(member["firstTempTaken"]), getResultEmoji(member["secondTempTaken"])), parse_mode=telegram.ParseMode.HTML)
-    print("*****************************************")
+        context.bot.send_message(chat_id=user_id, text="Current status: 1st Log - [%s], 2nd Log - [%s]" % (getResultEmoji(user_data["firstTempTaken"]), getResultEmoji(user_data["secondTempTaken"])), parse_mode=telegram.ParseMode.HTML)
 
 def main():
     persistence_pickle = PicklePersistence(filename='persistence_pickle')
@@ -432,7 +427,7 @@ def main():
     morningCheckTime = datetime.time(10, 30, 00, 000000, tzinfo=d_aware.tzinfo)
     morningCheckJob = job.run_daily(daily_temperature_checks, morningCheckTime, days=(0,1,2,3,4), context={"check_time":"morning"})
 
-    afternoonCheckTime = datetime.time(1, 47, 55, 000000, tzinfo=d_aware.tzinfo)
+    afternoonCheckTime = datetime.time(17, 30, 00, 000000, tzinfo=d_aware.tzinfo)
     afternoonCheckJob = job.run_daily(daily_temperature_checks, afternoonCheckTime, days=(0,1,2,3,4,5,6), context={"check_time":"afternoon"})
 
     dailyResultsTime = datetime.time(19, 00, 00, 000000, tzinfo=d_aware.tzinfo)
